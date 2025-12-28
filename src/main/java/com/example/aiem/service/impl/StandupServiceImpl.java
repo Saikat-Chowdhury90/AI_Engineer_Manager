@@ -1,10 +1,14 @@
 package com.example.aiem.service.impl;
 
+import com.example.aiem.client.GitHubClient;
+import com.example.aiem.dto.GithubCommitResponse;
 import com.example.aiem.dto.StandupResponse;
 import com.example.aiem.entity.GithubActivityEntity;
 import com.example.aiem.model.GithubActivity;
 import com.example.aiem.repository.GithubActivityRespository;
 import com.example.aiem.service.StandupService;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -17,9 +21,16 @@ public class StandupServiceImpl implements StandupService {
     private static final Logger logger = LoggerFactory.getLogger(StandupServiceImpl.class);
 
     private final GithubActivityRespository repository;
+    private final GitHubClient gitHubClient;
+    @Value("${github.owner}")
+    private String owner;
+    @Value("${github.repo}")
+    private String repo;
 
-    public StandupServiceImpl(GithubActivityRespository repository) {
+    public StandupServiceImpl(GithubActivityRespository repository, GitHubClient gitHubClient) {
+
         this.repository = repository;
+        this.gitHubClient = gitHubClient;
     }
 
     @Override
@@ -27,7 +38,8 @@ public class StandupServiceImpl implements StandupService {
 
         logger.info("generating standup report");
 
-        GithubActivity activity = simulateGithubActivity();
+        GithubActivity activity = fetchGithubActivity();
+        //GithubActivity activity = simulateGithubActivity();
 
         repository.save(new GithubActivityEntity(
                 activity.getCommitsToday(),
@@ -45,6 +57,35 @@ public class StandupServiceImpl implements StandupService {
         return new StandupResponse(
                 LocalDate.now().toString(),
                 summary
+        );
+    }
+
+    private GithubActivity fetchGithubActivity() {
+        logger.info("fetching GitHub activity");
+
+        GithubCommitResponse[] commits = gitHubClient.getCommits(owner, repo);
+
+        // Parse the responses to extract the required data
+        int commitsToday = 0;
+
+        if(commits != null){
+            for (GithubCommitResponse commit : commits) {
+                if(commit.getCommit() != null && commit.getCommit().getAuthor() != null){
+
+                    String commitDate = commit.getCommit().getAuthor().getDate();
+
+                    if (commitDate.startsWith(LocalDate.now().toString())) {
+                        commitsToday++;
+                    }
+                }
+            }
+        }
+        // For demonstration, we will simulate the data
+
+        return new GithubActivity(
+                commitsToday,  // commitsToday
+                0,   // prsMerged
+                0    // prsBlocked
         );
     }
 
