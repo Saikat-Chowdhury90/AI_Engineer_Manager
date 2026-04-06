@@ -13,7 +13,12 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeParseException;
+import java.time.temporal.ChronoUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -29,6 +34,10 @@ public class StandupServiceImpl implements StandupService {
     private String owner;
     @Value("${github.repo}")
     private String repo;
+    @Value("${github.timezone:UTC}")
+    private String githubTimezone;
+    @Value("${github.count.mode:date}")
+    private String countMode; // 'date' or 'last24'
 
     public StandupServiceImpl(GithubActivityRespository repository, GitHubClient gitHubClient, StandupAIService standupAIService) {
 
@@ -78,18 +87,61 @@ public class StandupServiceImpl implements StandupService {
 
             GithubCommitResponse[] commits = fetchWithRetry(3);
 
+            // DEBUG: log fetched commits count and sample entries
+            logger.debug("Fetched {} commits from GitHub", commits == null ? 0 : commits.length);
+            if (commits != null && commits.length > 0) {
+                int sample = Math.min(3, commits.length);
+                for (int i = 0; i < sample; i++) {
+                    GithubCommitResponse c = commits[i];
+                    String d = null;
+                    if (c != null && c.getCommit() != null && c.getCommit().getAuthor() != null) {
+                        d = c.getCommit().getAuthor().getDate();
+                    }
+                    logger.debug("Sample commit[{}] sha={} date={}", i, c == null ? "<null>" : c.getSha(), d);
+                }
+            }
+
             // Parse the responses to extract the required data
             int commitsToday = 0;
 
             if(commits != null){
+                ZoneId zoneId = ZoneId.of(githubTimezone);
+                LocalDate todayInZone = LocalDate.now(zoneId);
+                Instant nowInstant = Instant.now();
+                logger.debug("Counting commits for date={} in timezone={} using mode={}", todayInZone, githubTimezone, countMode);
+
                 for (GithubCommitResponse commit : commits) {
+                    if(commit == null) continue;
                     if(commit.getCommit() != null && commit.getCommit().getAuthor() != null){
 
                         String commitDate = commit.getCommit().getAuthor().getDate();
 
-                        if (commitDate.startsWith(LocalDate.now().toString())) {
-                            commitsToday++;
+                        if (commitDate == null) {
+                            logger.debug("Skipping commit with null date: sha={}", commit.getSha());
+                            continue;
                         }
+
+                        try {
+                            // Parse the commit date (ISO-8601)
+                            OffsetDateTime odt = OffsetDateTime.parse(commitDate);
+                            Instant commitInstant = odt.toInstant();
+                            LocalDate commitLocalDate = odt.atZoneSameInstant(zoneId).toLocalDate();
+
+                            logger.debug("Commit sha={} rawDate={} commitLocalDate={} instant={}", commit.getSha(), commitDate, commitLocalDate, commitInstant);
+
+                            if ("last24".equalsIgnoreCase(countMode)) {
+                                if (commitInstant.isAfter(nowInstant.minus(24, ChronoUnit.HOURS))) {
+                                    commitsToday++;
+                                }
+                            } else {
+                                if (commitLocalDate.equals(todayInZone)) {
+                                    commitsToday++;
+                                }
+                            }
+                        } catch (DateTimeParseException e) {
+                            logger.warn("Unable to parse commit date='{}'. Skipping commit sha={}", commitDate, commit.getSha());
+                        }
+
                     }
                 }
             }

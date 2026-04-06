@@ -4,6 +4,7 @@ import com.example.aiem.cache.AiStandupCacheStore;
 import com.example.aiem.client.GeminiClient;
 import com.example.aiem.model.GithubActivity;
 import com.example.aiem.service.StandupAIService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -11,6 +12,10 @@ public class StandupAIServiceImpl implements StandupAIService {
 
     private final GeminiClient aiClient;
     private final AiStandupCacheStore cacheStore;
+    @Value("${github.owner}")
+    private String owner;
+    @Value("${github.repo}")
+    private String repo;
 
     public StandupAIServiceImpl(GeminiClient aiClient, AiStandupCacheStore cacheStore) {
         this.aiClient = aiClient;
@@ -20,7 +25,13 @@ public class StandupAIServiceImpl implements StandupAIService {
     @Override
     public String analyzeActivity(GithubActivity activity) {
 
-        String repoKey = "default-repo"; // In a real implementation, this would be dynamic based on the repo
+        //String cacheKey = owner + ":" + repo + ":" +
+        //        activity.getCommitsToday() + ":" +
+        //        activity.getPrsMerged() + ":" +
+        //        activity.getPrsBlocked();
+
+        String repoKey = owner + ":" + repo + ":" + activity.getCommitsToday() + ":" +
+                        activity.getPrsMerged() + ":" + activity.getPrsBlocked();
         String cachedSummary = cacheStore.get(repoKey, java.time.LocalDate.now());
         if (cachedSummary != null) {
             return cachedSummary;
