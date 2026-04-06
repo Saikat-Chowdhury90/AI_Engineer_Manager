@@ -1,5 +1,6 @@
 package com.example.aiem.service.impl;
 
+import com.example.aiem.cache.AiStandupCacheStore;
 import com.example.aiem.client.GeminiClient;
 import com.example.aiem.model.GithubActivity;
 import com.example.aiem.service.StandupAIService;
@@ -9,13 +10,21 @@ import org.springframework.stereotype.Service;
 public class StandupAIServiceImpl implements StandupAIService {
 
     private final GeminiClient aiClient;
+    private final AiStandupCacheStore cacheStore;
 
-    public StandupAIServiceImpl(GeminiClient aiClient) {
+    public StandupAIServiceImpl(GeminiClient aiClient, AiStandupCacheStore cacheStore) {
         this.aiClient = aiClient;
+        this.cacheStore = cacheStore;
     }
 
     @Override
     public String analyzeActivity(GithubActivity activity) {
+
+        String repoKey = "default-repo"; // In a real implementation, this would be dynamic based on the repo
+        String cachedSummary = cacheStore.get(repoKey, java.time.LocalDate.now());
+        if (cachedSummary != null) {
+            return cachedSummary;
+        }
 
         String prompt = """
                  Here is today's GitHub activity for the team:
@@ -35,6 +44,10 @@ public class StandupAIServiceImpl implements StandupAIService {
                         activity.getPrsBlocked()
                 );
 
-        return aiClient.analyze(prompt);
+        String summary = aiClient.analyze(prompt);
+
+        cacheStore.put(repoKey, java.time.LocalDate.now(), summary);
+
+        return summary;
     }
 }
