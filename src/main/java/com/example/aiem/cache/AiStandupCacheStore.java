@@ -2,10 +2,12 @@ package com.example.aiem.cache;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
 import java.util.concurrent.ConcurrentHashMap;
 
+@Component
 public class AiStandupCacheStore {
     private static final Logger logger = LoggerFactory.getLogger(AiStandupCacheStore.class);
     private final ConcurrentHashMap<String, AIStandupCache> cacheMap= new ConcurrentHashMap<>();
