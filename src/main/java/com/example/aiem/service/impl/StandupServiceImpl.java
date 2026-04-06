@@ -4,8 +4,10 @@ import com.example.aiem.client.GitHubClient;
 import com.example.aiem.dto.GithubCommitResponse;
 import com.example.aiem.dto.StandupResponse;
 import com.example.aiem.entity.GithubActivityEntity;
+import com.example.aiem.exception.GitHubApiException;
 import com.example.aiem.model.GithubActivity;
 import com.example.aiem.repository.GithubActivityRespository;
+import com.example.aiem.service.StandupAIService;
 import com.example.aiem.service.StandupService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
@@ -22,15 +24,17 @@ public class StandupServiceImpl implements StandupService {
 
     private final GithubActivityRespository repository;
     private final GitHubClient gitHubClient;
+    private final StandupAIService standupAIService;
     @Value("${github.owner}")
     private String owner;
     @Value("${github.repo}")
     private String repo;
 
-    public StandupServiceImpl(GithubActivityRespository repository, GitHubClient gitHubClient) {
+    public StandupServiceImpl(GithubActivityRespository repository, GitHubClient gitHubClient, StandupAIService standupAIService) {
 
         this.repository = repository;
         this.gitHubClient = gitHubClient;
+        this.standupAIService = standupAIService;
     }
 
     @Override
@@ -50,7 +54,13 @@ public class StandupServiceImpl implements StandupService {
         logger.debug("GitHub activity fetched: Commits Today - {}, PRs Merged - {}, PRs Blocked - {}",
                 activity.getCommitsToday(), activity.getPrsMerged(), activity.getPrsBlocked());
 
-        String summary = buildSummary(activity);
+        String summary;
+        try {
+            summary = standupAIService.analyzeActivity(activity);
+        } catch (Exception e) {
+            logger.error("AI analysis failed. Falling back to basic summary", e);
+            summary = buildSummary(activity);
+        }
 
         logger.info("Standup summary generated successfully");
 
@@ -61,32 +71,45 @@ public class StandupServiceImpl implements StandupService {
     }
 
     private GithubActivity fetchGithubActivity() {
-        logger.info("fetching GitHub activity");
 
-        GithubCommitResponse[] commits = gitHubClient.getCommits(owner, repo);
+        try{
 
-        // Parse the responses to extract the required data
-        int commitsToday = 0;
+            logger.info("fetching GitHub activity for repo: {}/{}", owner, repo);
 
-        if(commits != null){
-            for (GithubCommitResponse commit : commits) {
-                if(commit.getCommit() != null && commit.getCommit().getAuthor() != null){
+            GithubCommitResponse[] commits = fetchWithRetry(3);
 
-                    String commitDate = commit.getCommit().getAuthor().getDate();
+            // Parse the responses to extract the required data
+            int commitsToday = 0;
 
-                    if (commitDate.startsWith(LocalDate.now().toString())) {
-                        commitsToday++;
+            if(commits != null){
+                for (GithubCommitResponse commit : commits) {
+                    if(commit.getCommit() != null && commit.getCommit().getAuthor() != null){
+
+                        String commitDate = commit.getCommit().getAuthor().getDate();
+
+                        if (commitDate.startsWith(LocalDate.now().toString())) {
+                            commitsToday++;
+                        }
                     }
                 }
             }
-        }
-        // For demonstration, we will simulate the data
+            // For demonstration, we will simulate the data
 
-        return new GithubActivity(
-                commitsToday,  // commitsToday
-                0,   // prsMerged
-                0    // prsBlocked
-        );
+            return new GithubActivity(
+                    commitsToday,  // commitsToday
+                    0,   // prsMerged
+                    0    // prsBlocked
+            );
+        } catch (GitHubApiException e) {
+            logger.error("GitHub API failed. Falling back to safe defaults", e);
+
+            // Fallback – system keeps working
+            return new GithubActivity(
+                    0,
+                    0,
+                    0
+            );
+        }
     }
 
     private GithubActivity simulateGithubActivity() {
@@ -118,5 +141,22 @@ public class StandupServiceImpl implements StandupService {
         }
         return summary.toString();
     }
+
+    private GithubCommitResponse[] fetchWithRetry(int attempts) {
+
+        int count = 0;
+
+        while (count < attempts) {
+            try {
+                return gitHubClient.getCommits(owner, repo);
+            } catch (GitHubApiException ex) {
+                count++;
+                logger.warn("Retrying GitHub API call... attempt {}", count);
+            }
+        }
+
+        throw new GitHubApiException("GitHub API failed after retries");
+    }
+
 
 }
